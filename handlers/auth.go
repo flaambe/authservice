@@ -4,28 +4,31 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/flaambe/authservice/usecase"
 	"github.com/flaambe/authservice/views"
 )
 
-type UserHandler struct {
-	userUsecase usecase.UserUsecase
+type AuthUsecase interface {
+	Auth(body views.AccessTokenRequest) (views.TokensResponse, error)
 }
 
-func NewUserHandler(u usecase.UserUsecase) *UserHandler {
-	return &UserHandler{
-		userUsecase: u,
+type AuthHandler struct {
+	authUsecase AuthUsecase
+}
+
+func NewAuthHandler(a AuthUsecase) *AuthHandler {
+	return &AuthHandler{
+		authUsecase: a,
 	}
 }
 
-func (h *UserHandler) GetToken(w http.ResponseWriter, r *http.Request) {
+func (a *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
 	var body views.AccessTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
 
-	response, _ := h.userUsecase.GetToken(body)
+	response, _ := a.authUsecase.Auth(body)
 
 	respondWithJSON(w, http.StatusOK, response)
 }

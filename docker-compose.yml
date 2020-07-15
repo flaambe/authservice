@@ -1,10 +1,10 @@
-version: '3.1'
+version: '3.7'
 
 services:
   mongo_1:
     container_name: mongo1
     image: mongo
-    command: mongod --replSet rs-1
+    command: mongod --replSet rs0
     restart: on-failure
     ports:
       - 27017:27017
@@ -13,21 +13,25 @@ services:
   mongo_2:
     container_name: mongo2
     image: mongo
-    command: mongod --replSet rs-1
+    command: mongod --replSet rs0
     restart: on-failure
     ports:
       - 27018:27017
     networks:
       - my-mongo-cluster
+    depends_on:
+      - mongo_1
   mongo_3:
     container_name: mongo3
     image: mongo
-    command: mongod --replSet rs-1
+    command: mongod --replSet rs0
     restart: on-failure
     ports:
       - 27019:27017
     networks:
       - my-mongo-cluster
+    depends_on:
+      - mongo_2
 
 networks:
   my-mongo-cluster:
