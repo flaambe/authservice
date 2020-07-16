@@ -2,16 +2,14 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"log"
-	"os"
 	"time"
 
 	"github.com/flaambe/authservice/errs"
-
-	"github.com/dgrijalva/jwt-go"
 	"github.com/flaambe/authservice/models"
+	"github.com/flaambe/authservice/token"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"golang.org/x/crypto/bcrypt"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -22,13 +20,6 @@ import (
 	"github.com/flaambe/authservice/views"
 )
 
-const (
-	BEARER_SCHEMA string = "Bearer "
-)
-
-type EmptyResponse struct {
-}
-
 type AuthUsecase struct {
 	db *mongo.Database
 }
@@ -37,48 +28,8 @@ func NewAuthUsecase(db *mongo.Database) *AuthUsecase {
 	return &AuthUsecase{db}
 }
 
-func CreateAccessToken(userId string) (string, error) {
-	var err error
-	//Creating Access Token
-	atClaims := jwt.MapClaims{}
-	atClaims["authorized"] = true
-	atClaims["user_id"] = userId
-	atClaims["exp"] = time.Now().Add(time.Minute * 10).Unix()
-	at := jwt.NewWithClaims(jwt.SigningMethodHS512, atClaims)
-	token, err := at.SignedString([]byte(os.Getenv("ACCESS_SECRET")))
-	if err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
-func CreateRefreshToken(userId string) (string, error) {
-	var err error
-	//Creating Refresh Token
-	atClaims := jwt.MapClaims{}
-	atClaims["authorized"] = true
-	atClaims["user_id"] = userId
-	atClaims["exp"] = time.Now().Add(time.Minute * 60).Unix()
-	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
-	token, err := at.SignedString([]byte((os.Getenv("REFRESH_SECRET"))))
-	if err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
-func HashToken(token string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(token), 14)
-	return string(bytes), err
-}
-
-func CheckTokenHash(token, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(token))
-	return err == nil
-}
-
-func (a *AuthUsecase) Auth(body views.AccessTokenRequest) (views.TokensResponse, error) {
-	var tokensResponse views.TokensResponse
+func (a *AuthUsecase) Auth(body views.AuthRequest) (views.AuthResponse, error) {
+	var authResponse views.AuthResponse
 
 	users := a.db.Collection("users")
 	tokens := a.db.Collection("tokens")
@@ -88,8 +39,9 @@ func (a *AuthUsecase) Auth(body views.AccessTokenRequest) (views.TokensResponse,
 			SetReadConcern(readconcern.Snapshot()).
 			SetWriteConcern(writeconcern.New(writeconcern.WMajority())),
 		)
+
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			return err
 		}
 
 		upsert := true
@@ -100,32 +52,30 @@ func (a *AuthUsecase) Auth(body views.AccessTokenRequest) (views.TokensResponse,
 		}
 
 		userFilter := bson.M{"guid": body.GUID}
-		userUpdate := bson.D{
-			{"$set", bson.D{{"guid", body.GUID}}},
-		}
-
-		userResult := users.FindOneAndUpdate(sctx, userFilter, userUpdate, &opt)
-		if userResult.Err() != nil {
-			sctx.AbortTransaction(sctx)
-			log.Println("caught exception during transaction, aborting.")
-			return errs.New(404, "User not founded")
-		}
+		userUpdate := bson.M{"$set": bson.M{"guid": body.GUID}}
 
 		user := models.User{}
-		userResult.Decode(&user)
 
-		accessToken, err := CreateAccessToken(user.GUID)
+		err = users.FindOneAndUpdate(sctx, userFilter, userUpdate, &opt).Decode(&user)
 		if err != nil {
+			sctx.AbortTransaction(sctx)
+			log.Println("caught exception during transaction, aborting.")
 			return errs.New(500, "Server internal error")
 		}
 
-		refreshToken, err := CreateRefreshToken(user.GUID)
+		accessToken, err := token.CreateAccessToken(user.GUID)
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			return err
 		}
-		hashedRefreshToken, err := HashToken(refreshToken)
+
+		refreshToken, err := token.CreateRefreshToken(user.GUID)
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			return err
+		}
+
+		hashedRefreshToken, err := token.HashToken(refreshToken)
+		if err != nil {
+			return err
 		}
 
 		tokenDocument := models.AuthToken{
@@ -141,32 +91,35 @@ func (a *AuthUsecase) Auth(body views.AccessTokenRequest) (views.TokensResponse,
 		if err != nil {
 			sctx.AbortTransaction(sctx)
 			log.Println("caught exception during transaction, aborting.")
-			return errs.New(500, "Server internal error")
+			return err
 		}
-
-		tokensResponse.AccessToken = accessToken
-		tokensResponse.TokenType = tokenDocument.TokenType
-		tokensResponse.ExpiresIn = int(time.Duration(10) * time.Minute / time.Second)
-		tokensResponse.RefreshToken = refreshToken
 
 		err = sctx.CommitTransaction(sctx)
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			return err
+		}
+
+		authResponse = views.AuthResponse{
+			AccessToken:  accessToken,
+			TokenType:    tokenDocument.TokenType,
+			ExpiresIn:    int(time.Duration(token.AccessTokenDuration) * time.Minute / time.Second),
+			RefreshToken: refreshToken,
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		log.Fatal(err)
-		return views.TokensResponse{}, errs.New(500, "Internal Server Error")
+		return views.AuthResponse{}, errs.New(500, "Internal Server Error")
 	}
 
-	return tokensResponse, nil
+	return authResponse, nil
 }
 
-func (a *AuthUsecase) Delete(bearer string) (views.TokensResponse, error) {
+func (a *AuthUsecase) Refresh(body views.RefreshTokenRequest) (views.AuthResponse, error) {
+	var authResponse views.AuthResponse
 
+	users := a.db.Collection("users")
 	tokens := a.db.Collection("tokens")
 
 	err := a.db.Client().UseSession(context.Background(), func(sctx mongo.SessionContext) error {
@@ -178,19 +131,44 @@ func (a *AuthUsecase) Delete(bearer string) (views.TokensResponse, error) {
 			return errs.New(500, "Server internal error")
 		}
 
-		token := models.AuthToken{}
-		accessTokenResult := tokens.FindOne(sctx, bson.D{{"aсcess_token", bearer}})
-		err = accessTokenResult.Decode(&token)
+		tokenModel := models.AuthToken{}
+		filterToken := bson.M{"access_token": body.AccessToken}
+		err = tokens.FindOne(sctx, filterToken).Decode(&tokenModel)
 		if err != nil {
 			return errs.New(403, "Access forbidden")
 		}
 
-		if token.AccessExpiresAt.Time().Before(time.Now()) {
+		if tokenModel.AccessExpiresAt.Time().Before(time.Now()) {
 			return errs.New(403, "Access forbidden")
 		}
 
-		// Delete token
-		_, err = tokens.DeleteMany(sctx, bson.D{{"access_token", token.AccessToken}})
+		if !token.CheckTokenHash(body.RefreshToken, tokenModel.RefreshToken) {
+			return errs.New(403, "Access forbidden")
+		}
+
+		// Refresh token
+		user := models.User{}
+		err = users.FindOne(sctx, bson.M{"_id": tokenModel.UserID}).Decode(&user)
+		if err != nil {
+			return errs.New(500, "Server internal error")
+		}
+
+		newAccessToken, err := token.CreateAccessToken(user.GUID)
+		if err != nil {
+			return errs.New(500, "Server internal error")
+		}
+		updateToken := bson.M{"$set": bson.M{"access_token": newAccessToken}}
+		upsert := true
+		after := options.After
+		opt := options.FindOneAndUpdateOptions{
+			ReturnDocument: &after,
+			Upsert:         &upsert,
+		}
+		err = tokens.FindOneAndUpdate(sctx, filterToken, updateToken, &opt).Decode(&tokenModel)
+		if err != nil {
+			return errs.New(500, "Server internal error")
+		}
+
 		if err != nil {
 			sctx.AbortTransaction(sctx)
 			log.Println("caught exception during transaction, aborting.")
@@ -201,17 +179,29 @@ func (a *AuthUsecase) Delete(bearer string) (views.TokensResponse, error) {
 		if err != nil {
 			return errs.New(500, "Server internal error")
 		}
+
+		authResponse = views.AuthResponse{
+			AccessToken:  tokenModel.AccessToken,
+			TokenType:    tokenModel.TokenType,
+			ExpiresIn:    int(time.Duration(token.AccessTokenDuration) * time.Minute / time.Second),
+			RefreshToken: body.RefreshToken,
+		}
+
 		return nil
 	})
 
 	if err != nil {
-		return views.TokensResponse{}, err
+		var requestError *errs.RequestError
+		if errors.As(err, &requestError) {
+			return views.AuthResponse{}, errs.New(requestError.Status, requestError.Error())
+		}
+		return views.AuthResponse{}, errs.New(500, err.Error())
 	}
 
-	return views.TokensResponse{}, nil
+	return authResponse, nil
 }
 
-func (a *AuthUsecase) DeleteAll(bearer string) (views.TokensResponse, error) {
+func (a *AuthUsecase) Delete(body views.DeleteTokenRequest) error {
 
 	tokens := a.db.Collection("tokens")
 
@@ -225,8 +215,56 @@ func (a *AuthUsecase) DeleteAll(bearer string) (views.TokensResponse, error) {
 		}
 
 		token := models.AuthToken{}
-		accessTokenResult := tokens.FindOne(sctx, bson.D{{"aсcess_token", bearer}})
-		err = accessTokenResult.Decode(&token)
+		filterToken := bson.M{"access_token": body.AccessToken}
+		err = tokens.FindOne(sctx, filterToken).Decode(&token)
+		if err != nil {
+			return errs.New(403, "Access forbidden")
+		}
+
+		if token.AccessExpiresAt.Time().Before(time.Now()) {
+			return errs.New(403, "Access forbidden")
+		}
+
+		// TODO:
+		// Delete refresh token
+
+		if err != nil {
+			sctx.AbortTransaction(sctx)
+			log.Println("caught exception during transaction, aborting.")
+			return errs.New(500, "Server internal error")
+		}
+
+		err = sctx.CommitTransaction(sctx)
+		if err != nil {
+			var requestError *errs.RequestError
+			if errors.As(err, &requestError) {
+				return errs.New(requestError.Status, requestError.Error())
+			}
+			return errs.New(500, err.Error())
+		}
+		return nil
+	})
+
+	return err
+}
+
+func (a *AuthUsecase) DeleteAll(body views.DeleteAllTokensRequest) error {
+
+	tokens := a.db.Collection("tokens")
+
+	err := a.db.Client().UseSession(context.Background(), func(sctx mongo.SessionContext) error {
+		err := sctx.StartTransaction(options.Transaction().
+			SetReadConcern(readconcern.Snapshot()).
+			SetWriteConcern(writeconcern.New(writeconcern.WMajority())),
+		)
+		if err != nil {
+			return errs.New(500, "Server internal error")
+		}
+
+		token := models.AuthToken{}
+		filterToken := bson.M{"access_token": body.AccessToken}
+
+		err = tokens.FindOne(sctx, filterToken).Decode(&token)
 		if err != nil {
 			return errs.New(403, "Access forbidden")
 		}
@@ -236,7 +274,7 @@ func (a *AuthUsecase) DeleteAll(bearer string) (views.TokensResponse, error) {
 		}
 
 		// Delete all tokens for user
-		_, err = tokens.DeleteMany(sctx, bson.D{{"user_id", token.UserID}})
+		_, err = tokens.DeleteMany(sctx, bson.M{"user_id": token.UserID})
 		if err != nil {
 			sctx.AbortTransaction(sctx)
 			log.Println("caught exception during transaction, aborting.")
@@ -245,14 +283,14 @@ func (a *AuthUsecase) DeleteAll(bearer string) (views.TokensResponse, error) {
 
 		err = sctx.CommitTransaction(sctx)
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			var requestError *errs.RequestError
+			if errors.As(err, &requestError) {
+				return errs.New(requestError.Status, requestError.Error())
+			}
+			return errs.New(500, err.Error())
 		}
 		return nil
 	})
 
-	if err != nil {
-		return views.TokensResponse{}, err
-	}
-
-	return views.TokensResponse{}, nil
+	return err
 }

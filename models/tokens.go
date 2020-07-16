@@ -6,9 +6,9 @@ import (
 
 type AuthToken struct {
 	ID               primitive.ObjectID `bson:"_id,omitempty"`
-	UserID           primitive.ObjectID `bson:"user_id"`
+	UserID           primitive.ObjectID `bson:"user_id,omitempty"`
 	TokenType        string             `bson:"token_type"`
-	AccessToken      string             `bson:"aсcess_token"`
+	AccessToken      string             `bson:"access_token"`
 	RefreshToken     string             `bson:"refresh_token"`
 	AccessExpiresAt  primitive.DateTime `bson:"access_expires_at"`
 	RefreshExpiresAt primitive.DateTime `bson:"refresh_expires_at"`

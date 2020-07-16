@@ -9,9 +9,9 @@ func (e *RequestError) Error() string {
 	return e.Message
 }
 
-func New(code int, message string) *RequestError {
+func New(status int, message string) *RequestError {
 	return &RequestError{
-		Status:  code,
+		Status:  status,
 		Message: message,
 	}
 }

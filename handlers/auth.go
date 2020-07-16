@@ -12,144 +12,160 @@ import (
 )
 
 const (
-	BEARER_SCHEMA string = "Bearer "
+	bearerSchema string = "Bearer "
 )
 
 type AuthUsecase interface {
-	Auth(body views.AccessTokenRequest) (views.TokensResponse, error)
-	Delete(bearer string) (views.TokensResponse, error)
-	DeleteAll(bearer string) (views.TokensResponse, error)
+	Auth(body views.AuthRequest) (views.AuthResponse, error)
+	Refresh(body views.RefreshTokenRequest) (views.AuthResponse, error)
+	Delete(body views.DeleteTokenRequest) error
+	DeleteAll(body views.DeleteAllTokensRequest) error
 }
 
 type AuthHandler struct {
 	authUsecase AuthUsecase
 }
 
-func NewAuthHandler(a AuthUsecase) *AuthHandler {
+func NewAuthHandler(au AuthUsecase) *AuthHandler {
 	return &AuthHandler{
-		authUsecase: a,
+		authUsecase: au,
 	}
 }
 
-func GetBearer(req *http.Request) (string, error) {
-	// Grab the raw Authoirzation header
+func (h *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
+	var body views.AuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if len(body.GUID) == 0 {
+		respondWithError(w, http.StatusBadRequest, "GUID not found")
+		return
+	}
+
+	response, err := h.authUsecase.Auth(body)
+	if err != nil {
+		var requestError *errs.RequestError
+		if errors.As(err, &requestError) {
+			respondWithError(w, requestError.Status, requestError.Message)
+			return
+		}
+
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, response)
+}
+
+func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var body views.RefreshTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	bearer, err := getBearer(r)
+	if err != nil {
+		respondWithError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	body.AccessToken = bearer
+
+	if len(body.RefreshToken) == 0 {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	response, err := h.authUsecase.Refresh(body)
+	if err != nil {
+		var requestError *errs.RequestError
+		if errors.As(err, &requestError) {
+			respondWithError(w, requestError.Status, requestError.Message)
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, response)
+}
+
+func (h *AuthHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	var body views.DeleteTokenRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	bearer, err := getBearer(r)
+	if err != nil {
+		respondWithError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	body.AccessToken = bearer
+
+	if len(body.RefreshToken) == 0 {
+		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	err = h.authUsecase.Delete(body)
+	if err != nil {
+		var requestError *errs.RequestError
+		if errors.As(err, &requestError) {
+			respondWithError(w, requestError.Status, requestError.Message)
+			return
+		}
+
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, views.EmptyResponse{})
+}
+
+func (h *AuthHandler) DeleteAll(w http.ResponseWriter, r *http.Request) {
+	var body views.DeleteAllTokensRequest
+
+	bearer, err := getBearer(r)
+	if err != nil {
+		respondWithError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	body.AccessToken = bearer
+
+	err = h.authUsecase.DeleteAll(body)
+	if err != nil {
+		var requestErr *errs.RequestError
+		if errors.As(err, &requestErr) {
+			respondWithError(w, requestErr.Status, requestErr.Message)
+			return
+		}
+
+		respondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, views.EmptyResponse{})
+}
+
+// helpers
+func getBearer(req *http.Request) (string, error) {
 	authHeader := req.Header.Get("Authorization")
 	if authHeader == "" {
 		return "", errors.New("Authorization header required")
 	}
 
-	if !strings.HasPrefix(authHeader, BEARER_SCHEMA) {
-		return "", errors.New("Authorization requires Basic/Bearer scheme")
+	if !strings.HasPrefix(authHeader, bearerSchema) {
+		return "", errors.New("Authorization requires Bearer scheme")
 	}
 
-	return authHeader[len(BEARER_SCHEMA):], nil
+	return authHeader[len(bearerSchema):], nil
 }
 
-func (a *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
-	var body views.AccessTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
-		return
-	}
-
-	if len(body.GUID) == 0 {
-		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
-		return
-	}
-
-	response, err := a.authUsecase.Auth(body)
-	if err != nil {
-		var requestErr errs.RequestError
-		if errors.As(err, &requestErr) {
-			respondWithError(w, requestErr.Status, requestErr.Message)
-			return
-		}
-
-		respondWithError(w, http.StatusInternalServerError, err.Error())
-	}
-
-	respondWithJSON(w, http.StatusOK, response)
-}
-
-func (a *AuthHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	var body views.AccessTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
-		return
-	}
-
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		respondWithError(w, http.StatusForbidden, "Authorization header required")
-		return
-	}
-
-	if !strings.HasPrefix(authHeader, BEARER_SCHEMA) {
-		respondWithError(w, http.StatusForbidden, "Authorization requires Bearer scheme")
-		return
-	}
-
-	bearer, err := GetBearer(r)
-	if err != nil {
-		respondWithError(w, http.StatusForbidden, err.Error())
-		return
-	}
-
-	response, err := a.authUsecase.Delete(bearer)
-	if err != nil {
-		var requestErr *errs.RequestError
-		if errors.As(err, &requestErr) {
-			respondWithError(w, requestErr.Status, requestErr.Message)
-			return
-		}
-
-		respondWithError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	respondWithJSON(w, http.StatusOK, response)
-}
-
-func (a *AuthHandler) DeleteAll(w http.ResponseWriter, r *http.Request) {
-	var body views.AccessTokenRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
-		return
-	}
-
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		respondWithError(w, http.StatusForbidden, "Authorization header required")
-		return
-	}
-
-	if !strings.HasPrefix(authHeader, BEARER_SCHEMA) {
-		respondWithError(w, http.StatusForbidden, "Authorization requires Bearer scheme")
-		return
-	}
-
-	bearer, err := GetBearer(r)
-	if err != nil {
-		respondWithError(w, http.StatusForbidden, err.Error())
-		return
-	}
-
-	response, err := a.authUsecase.DeleteAll(bearer)
-	if err != nil {
-		var requestErr *errs.RequestError
-		if errors.As(err, &requestErr) {
-			respondWithError(w, requestErr.Status, requestErr.Message)
-			return
-		}
-
-		respondWithError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	respondWithJSON(w, http.StatusOK, response)
-}
-
-// helpers
 func respondWithError(w http.ResponseWriter, code int, message string) {
 	respondWithJSON(w, code, map[string]string{"error": message})
 }
