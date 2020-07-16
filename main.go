@@ -4,8 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -14,15 +16,13 @@ import (
 	"github.com/flaambe/authservice/usecase"
 )
 
-const (
-	MONGODB_URI = "mongodb://mongo1:27017,mongo2:27018,mongo3:27019/?replicaSet=rs0"
-	dbName      = "auth"
-)
-
 func Connect() (*mongo.Database, error) {
+	MONGOURI := os.Getenv("MONGODB_URI")
+	DBNAME := os.Getenv("DBNAME")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(MONGODB_URI))
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(MONGOURI))
 
 	if err != nil {
 		return nil, err
@@ -34,12 +34,17 @@ func Connect() (*mongo.Database, error) {
 
 	log.Println("Database connected")
 
-	db := client.Database(dbName)
+	db := client.Database(DBNAME)
 
 	return db, nil
 }
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+		return
+	}
 
 	db, err := Connect()
 	if err != nil {
@@ -53,6 +58,7 @@ func main() {
 	handler := handlers.NewAuthHandler(authUsecase)
 
 	http.HandleFunc("/auth", handler.Auth)
+	http.HandleFunc("/deleteAll", handler.DeleteAll)
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

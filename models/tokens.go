@@ -5,10 +5,11 @@ import (
 )
 
 type AuthToken struct {
-	ID           primitive.ObjectID `bson:"_id,omitempty"`
-	UserID       primitive.ObjectID `bson:"user_id"`
-	TokenType    string             `bson:"token_type"`
-	AccessToken  string             `bson:"acess_token"`
-	RefreshToken string             `bson:"refresh_token"`
-	ExpiresAt    primitive.DateTime `bson:"expires_at"`
+	ID               primitive.ObjectID `bson:"_id,omitempty"`
+	UserID           primitive.ObjectID `bson:"user_id"`
+	TokenType        string             `bson:"token_type"`
+	AccessToken      string             `bson:"aсcess_token"`
+	RefreshToken     string             `bson:"refresh_token"`
+	AccessExpiresAt  primitive.DateTime `bson:"access_expires_at"`
+	RefreshExpiresAt primitive.DateTime `bson:"refresh_expires_at"`
 }
