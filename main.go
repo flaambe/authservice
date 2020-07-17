@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -17,6 +16,15 @@ import (
 	"github.com/flaambe/authservice/handlers"
 	"github.com/flaambe/authservice/usecase"
 )
+
+func getPort() string {
+	p := os.Getenv("PORT")
+	if p != "" {
+		return ":" + p
+	}
+
+	return ":8080"
+}
 
 func connect() (*mongo.Database, error) {
 	mongoURI := os.Getenv("MONGODB_URI")
@@ -42,11 +50,6 @@ func connect() (*mongo.Database, error) {
 }
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
 	db, err := connect()
 	if err != nil {
 		log.Fatal(err)
@@ -66,7 +69,7 @@ func main() {
 	r.HandleFunc("/deleteAllTokens", authHandler.DeleteAllTokens).Methods("POST")
 
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         getPort(),
 		WriteTimeout: time.Second * 15,
 		ReadTimeout:  time.Second * 15,
 		IdleTimeout:  time.Second * 60,

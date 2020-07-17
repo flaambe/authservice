@@ -1,3 +1,4 @@
+// +heroku goVersion go1.14
 module github.com/flaambe/authservice
 
 go 1.14
