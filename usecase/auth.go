@@ -2,8 +2,6 @@ package usecase
 
 import (
 	"context"
-	"errors"
-	"log"
 	"time"
 
 	"github.com/flaambe/authservice/errs"
@@ -28,7 +26,7 @@ func NewAuthUsecase(db *mongo.Database) *AuthUsecase {
 	return &AuthUsecase{db}
 }
 
-func (a *AuthUsecase) Auth(body views.AuthRequest) (views.AuthResponse, error) {
+func (a *AuthUsecase) Auth(guid string) (views.AuthResponse, error) {
 	var authResponse views.AuthResponse
 
 	users := a.db.Collection("users")
@@ -44,80 +42,72 @@ func (a *AuthUsecase) Auth(body views.AuthRequest) (views.AuthResponse, error) {
 			return err
 		}
 
-		upsert := true
-		after := options.After
-		opt := options.FindOneAndUpdateOptions{
-			ReturnDocument: &after,
-			Upsert:         &upsert,
-		}
+		opt := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
+		userFilter := bson.M{"guid": guid}
+		userUpdate := bson.M{"$set": bson.M{"guid": guid}}
 
-		userFilter := bson.M{"guid": body.GUID}
-		userUpdate := bson.M{"$set": bson.M{"guid": body.GUID}}
+		userValue := models.User{}
 
-		user := models.User{}
-
-		err = users.FindOneAndUpdate(sctx, userFilter, userUpdate, &opt).Decode(&user)
+		err = users.FindOneAndUpdate(sctx, userFilter, userUpdate, opt).Decode(&userValue)
 		if err != nil {
 			sctx.AbortTransaction(sctx)
-			log.Println("caught exception during transaction, aborting.")
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
-		accessToken, err := token.CreateAccessToken(user.GUID)
+		newAccessToken, err := token.CreateAccessToken(userValue.GUID)
 		if err != nil {
-			return err
+			return errs.New(500, "server internal error", err)
 		}
 
-		refreshToken, err := token.CreateRefreshToken(user.GUID)
+		newRefreshToken, err := token.CreateRefreshToken(userValue.GUID)
 		if err != nil {
-			return err
+			return errs.New(500, "server internal error", err)
 		}
 
-		hashedRefreshToken, err := token.HashToken(refreshToken)
+		hashedRefreshToken, err := token.HashToken(newRefreshToken)
 		if err != nil {
-			return err
+			return errs.New(500, "server internal error", err)
 		}
 
-		tokenDocument := models.AuthToken{
-			UserID:           user.ID,
-			AccessToken:      accessToken,
+		newTokenDocument := models.AuthToken{
+			UserID:           userValue.ID,
+			AccessToken:      newAccessToken,
 			RefreshToken:     hashedRefreshToken,
 			TokenType:        "Bearer",
-			AccessExpiresAt:  primitive.NewDateTimeFromTime(time.Now().Add(time.Minute * 10)),
-			RefreshExpiresAt: primitive.NewDateTimeFromTime(time.Now().Add(time.Minute * 60)),
+			AccessExpiresAt:  primitive.NewDateTimeFromTime(time.Now().Add(time.Minute * token.AccessTokenDuration)),
+			RefreshExpiresAt: primitive.NewDateTimeFromTime(time.Now().Add(time.Minute * token.RefreshTokenDuration)),
 		}
 
-		_, err = tokens.InsertOne(sctx, tokenDocument)
+		_, err = tokens.InsertOne(sctx, newTokenDocument)
 		if err != nil {
 			sctx.AbortTransaction(sctx)
-			log.Println("caught exception during transaction, aborting.")
-			return err
+			return errs.New(500, "server internal error", err)
 		}
 
 		err = sctx.CommitTransaction(sctx)
 		if err != nil {
-			return err
+			return errs.New(500, "server internal error", err)
 		}
 
 		authResponse = views.AuthResponse{
-			AccessToken:  accessToken,
-			TokenType:    tokenDocument.TokenType,
-			ExpiresIn:    int(time.Duration(token.AccessTokenDuration) * time.Minute / time.Second),
-			RefreshToken: refreshToken,
+			AccessToken:  newTokenDocument.AccessToken,
+			TokenType:    newTokenDocument.TokenType,
+			ExpiresIn:    int(time.Duration(token.AccessTokenDuration) * time.Second),
+			RefreshToken: newTokenDocument.RefreshToken,
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return views.AuthResponse{}, errs.New(500, "Internal Server Error")
+		return views.AuthResponse{}, errs.New(500, err.Error(), err)
 	}
 
 	return authResponse, nil
 }
 
-func (a *AuthUsecase) Refresh(body views.RefreshTokenRequest) (views.AuthResponse, error) {
-	var authResponse views.AuthResponse
+func (a *AuthUsecase) Refresh(accessToken, refreshToken string) (views.RefreshResponse, error) {
+	var refreshResponse views.RefreshResponse
 
 	users := a.db.Collection("users")
 	tokens := a.db.Collection("tokens")
@@ -128,80 +118,82 @@ func (a *AuthUsecase) Refresh(body views.RefreshTokenRequest) (views.AuthRespons
 			SetWriteConcern(writeconcern.New(writeconcern.WMajority())),
 		)
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
-		tokenModel := models.AuthToken{}
-		filterToken := bson.M{"access_token": body.AccessToken}
-		err = tokens.FindOne(sctx, filterToken).Decode(&tokenModel)
+		tokenValue := models.AuthToken{}
+		filterByAccessToken := bson.M{"access_token": accessToken}
+
+		err = tokens.FindOne(sctx, filterByAccessToken).Decode(&tokenValue)
 		if err != nil {
-			return errs.New(403, "Access forbidden")
+			return errs.New(403, "access token expired", err)
 		}
 
-		if tokenModel.AccessExpiresAt.Time().Before(time.Now()) {
-			return errs.New(403, "Access forbidden")
+		if tokenValue.AccessExpiresAt.Time().Before(time.Now()) {
+			return errs.New(403, "access token expired", nil)
 		}
 
-		if !token.CheckTokenHash(body.RefreshToken, tokenModel.RefreshToken) {
-			return errs.New(403, "Access forbidden")
+		if !token.CheckTokenHash(refreshToken, tokenValue.RefreshToken) {
+			return errs.New(403, "access forbidden", nil)
 		}
 
 		// Refresh token
-		user := models.User{}
-		err = users.FindOne(sctx, bson.M{"_id": tokenModel.UserID}).Decode(&user)
+		userValue := models.User{}
+		filterByUserID := bson.M{"_id": tokenValue.UserID}
+		err = users.FindOne(sctx, filterByUserID).Decode(&userValue)
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
-		newAccessToken, err := token.CreateAccessToken(user.GUID)
+		newAccessToken, err := token.CreateAccessToken(userValue.GUID)
 		if err != nil {
-			return errs.New(500, "Server internal error")
-		}
-		updateToken := bson.M{"$set": bson.M{"access_token": newAccessToken}}
-		upsert := true
-		after := options.After
-		opt := options.FindOneAndUpdateOptions{
-			ReturnDocument: &after,
-			Upsert:         &upsert,
-		}
-		err = tokens.FindOneAndUpdate(sctx, filterToken, updateToken, &opt).Decode(&tokenModel)
-		if err != nil {
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
+		newRefreshToken, err := token.CreateRefreshToken(userValue.GUID)
+		if err != nil {
+			return errs.New(500, "server internal error", err)
+		}
+
+		replaceToken := models.AuthToken{
+			AccessToken:      newAccessToken,
+			RefreshToken:     newRefreshToken,
+			TokenType:        "Bearer",
+			UserID:           userValue.ID,
+			AccessExpiresAt:  primitive.NewDateTimeFromTime(time.Now().Add(time.Minute * token.AccessTokenDuration)),
+			RefreshExpiresAt: primitive.NewDateTimeFromTime(time.Now().Add(time.Minute * token.RefreshTokenDuration)),
+		}
+
+		opt := options.FindOneAndReplace().SetUpsert(true).SetReturnDocument(options.After)
+		err = tokens.FindOneAndReplace(sctx, filterByAccessToken, replaceToken, opt).Decode(&tokenValue)
 		if err != nil {
 			sctx.AbortTransaction(sctx)
-			log.Println("caught exception during transaction, aborting.")
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
 		err = sctx.CommitTransaction(sctx)
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
-		authResponse = views.AuthResponse{
-			AccessToken:  tokenModel.AccessToken,
-			TokenType:    tokenModel.TokenType,
-			ExpiresIn:    int(time.Duration(token.AccessTokenDuration) * time.Minute / time.Second),
-			RefreshToken: body.RefreshToken,
+		refreshResponse = views.RefreshResponse{
+			AccessToken:  tokenValue.AccessToken,
+			TokenType:    tokenValue.TokenType,
+			ExpiresIn:    int(time.Duration(token.AccessTokenDuration) * time.Second),
+			RefreshToken: tokenValue.RefreshToken,
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		var requestError *errs.RequestError
-		if errors.As(err, &requestError) {
-			return views.AuthResponse{}, errs.New(requestError.Status, requestError.Error())
-		}
-		return views.AuthResponse{}, errs.New(500, err.Error())
+		return views.RefreshResponse{}, errs.New(500, err.Error(), err)
 	}
 
-	return authResponse, nil
+	return refreshResponse, nil
 }
 
-func (a *AuthUsecase) Delete(body views.DeleteTokenRequest) error {
+func (a *AuthUsecase) Delete(accessToken, refreshToken string) error {
 
 	tokens := a.db.Collection("tokens")
 
@@ -210,45 +202,50 @@ func (a *AuthUsecase) Delete(body views.DeleteTokenRequest) error {
 			SetReadConcern(readconcern.Snapshot()).
 			SetWriteConcern(writeconcern.New(writeconcern.WMajority())),
 		)
+
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
-		token := models.AuthToken{}
-		filterToken := bson.M{"access_token": body.AccessToken}
-		err = tokens.FindOne(sctx, filterToken).Decode(&token)
+		tokenValue := models.AuthToken{}
+		filterByAccessToken := bson.M{"access_token": accessToken}
+
+		err = tokens.FindOne(sctx, filterByAccessToken).Decode(&tokenValue)
 		if err != nil {
-			return errs.New(403, "Access forbidden")
+			return errs.New(403, "access token expired", err)
 		}
 
-		if token.AccessExpiresAt.Time().Before(time.Now()) {
-			return errs.New(403, "Access forbidden")
+		if tokenValue.AccessExpiresAt.Time().Before(time.Now()) {
+			return errs.New(403, "access token expired", nil)
 		}
 
-		// TODO:
 		// Delete refresh token
+		if !token.CheckTokenHash(refreshToken, tokenValue.RefreshToken) {
+			return errs.New(403, "Access forbidden", nil)
+		}
+		err = tokens.FindOneAndDelete(sctx, filterByAccessToken).Err()
+		if err != nil {
+			sctx.AbortTransaction(sctx)
+			return errs.New(500, "server internal error", err)
+		}
 
 		if err != nil {
 			sctx.AbortTransaction(sctx)
-			log.Println("caught exception during transaction, aborting.")
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
 		err = sctx.CommitTransaction(sctx)
 		if err != nil {
-			var requestError *errs.RequestError
-			if errors.As(err, &requestError) {
-				return errs.New(requestError.Status, requestError.Error())
-			}
-			return errs.New(500, err.Error())
+			return errs.New(500, "server internal error", err)
 		}
+
 		return nil
 	})
 
 	return err
 }
 
-func (a *AuthUsecase) DeleteAll(body views.DeleteAllTokensRequest) error {
+func (a *AuthUsecase) DeleteAll(accessToken string) error {
 
 	tokens := a.db.Collection("tokens")
 
@@ -257,38 +254,36 @@ func (a *AuthUsecase) DeleteAll(body views.DeleteAllTokensRequest) error {
 			SetReadConcern(readconcern.Snapshot()).
 			SetWriteConcern(writeconcern.New(writeconcern.WMajority())),
 		)
+
 		if err != nil {
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
-		token := models.AuthToken{}
-		filterToken := bson.M{"access_token": body.AccessToken}
+		tokenValue := models.AuthToken{}
+		filterByAccessToken := bson.M{"access_token": accessToken}
 
-		err = tokens.FindOne(sctx, filterToken).Decode(&token)
+		err = tokens.FindOne(sctx, filterByAccessToken).Decode(&tokenValue)
 		if err != nil {
-			return errs.New(403, "Access forbidden")
+			return errs.New(403, "access token expired", err)
 		}
 
-		if token.AccessExpiresAt.Time().Before(time.Now()) {
-			return errs.New(403, "Access forbidden")
+		if tokenValue.AccessExpiresAt.Time().Before(time.Now()) {
+			return errs.New(403, "access token expired", nil)
 		}
 
 		// Delete all tokens for user
-		_, err = tokens.DeleteMany(sctx, bson.M{"user_id": token.UserID})
+		deleteFilter := bson.M{"user_id": tokenValue.UserID}
+		_, err = tokens.DeleteMany(sctx, deleteFilter)
 		if err != nil {
 			sctx.AbortTransaction(sctx)
-			log.Println("caught exception during transaction, aborting.")
-			return errs.New(500, "Server internal error")
+			return errs.New(500, "server internal error", err)
 		}
 
 		err = sctx.CommitTransaction(sctx)
 		if err != nil {
-			var requestError *errs.RequestError
-			if errors.As(err, &requestError) {
-				return errs.New(requestError.Status, requestError.Error())
-			}
-			return errs.New(500, err.Error())
+			return errs.New(500, "server internal error", err)
 		}
+
 		return nil
 	})
 

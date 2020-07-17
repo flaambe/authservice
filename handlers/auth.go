@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -16,10 +17,10 @@ const (
 )
 
 type AuthUsecase interface {
-	Auth(body views.AuthRequest) (views.AuthResponse, error)
-	Refresh(body views.RefreshTokenRequest) (views.AuthResponse, error)
-	Delete(body views.DeleteTokenRequest) error
-	DeleteAll(body views.DeleteAllTokensRequest) error
+	Auth(guid string) (views.AuthResponse, error)
+	Refresh(accessToken, refreshToken string) (views.RefreshResponse, error)
+	Delete(accessToken, refreshToken string) error
+	DeleteAll(accessToken string) error
 }
 
 type AuthHandler struct {
@@ -39,15 +40,19 @@ func (h *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(body.GUID) == 0 {
+	if body.GUID == "" {
 		respondWithError(w, http.StatusBadRequest, "GUID not found")
 		return
 	}
 
-	response, err := h.authUsecase.Auth(body)
+	response, err := h.authUsecase.Auth(body.GUID)
 	if err != nil {
 		var requestError *errs.RequestError
 		if errors.As(err, &requestError) {
+			if requestError.Err != nil {
+				log.Println(requestError.Err.Error())
+			}
+
 			respondWithError(w, requestError.Status, requestError.Message)
 			return
 		}
@@ -62,26 +67,29 @@ func (h *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var body views.RefreshTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	bearer, err := getBearer(r)
+	accessToken, err := getBearer(r)
 	if err != nil {
 		respondWithError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	body.AccessToken = bearer
 
-	if len(body.RefreshToken) == 0 {
-		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+	if body.RefreshToken == "" {
+		respondWithError(w, http.StatusBadRequest, "refresh token is missing")
 		return
 	}
 
-	response, err := h.authUsecase.Refresh(body)
+	response, err := h.authUsecase.Refresh(accessToken, body.RefreshToken)
 	if err != nil {
 		var requestError *errs.RequestError
 		if errors.As(err, &requestError) {
+			if requestError.Err != nil {
+				log.Println(requestError.Err.Error())
+			}
+
 			respondWithError(w, requestError.Status, requestError.Message)
 			return
 		}
@@ -96,26 +104,29 @@ func (h *AuthHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	var body views.DeleteTokenRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	bearer, err := getBearer(r)
+	accessToken, err := getBearer(r)
 	if err != nil {
 		respondWithError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	body.AccessToken = bearer
 
-	if len(body.RefreshToken) == 0 {
-		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
+	if body.RefreshToken == "" {
+		respondWithError(w, http.StatusBadRequest, "refresh token is missing")
 		return
 	}
 
-	err = h.authUsecase.Delete(body)
+	err = h.authUsecase.Delete(accessToken, body.RefreshToken)
 	if err != nil {
 		var requestError *errs.RequestError
 		if errors.As(err, &requestError) {
+			if requestError.Err != nil {
+				log.Println(requestError.Err.Error())
+			}
+
 			respondWithError(w, requestError.Status, requestError.Message)
 			return
 		}
@@ -124,23 +135,24 @@ func (h *AuthHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusNoContent, views.EmptyResponse{})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *AuthHandler) DeleteAll(w http.ResponseWriter, r *http.Request) {
-	var body views.DeleteAllTokensRequest
-
-	bearer, err := getBearer(r)
+	accessToken, err := getBearer(r)
 	if err != nil {
 		respondWithError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	body.AccessToken = bearer
 
-	err = h.authUsecase.DeleteAll(body)
+	err = h.authUsecase.DeleteAll(accessToken)
 	if err != nil {
 		var requestErr *errs.RequestError
 		if errors.As(err, &requestErr) {
+			if requestErr.Err != nil {
+				log.Println(requestErr.Err.Error())
+			}
+
 			respondWithError(w, requestErr.Status, requestErr.Message)
 			return
 		}
@@ -149,25 +161,25 @@ func (h *AuthHandler) DeleteAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusNoContent, views.EmptyResponse{})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // helpers
 func getBearer(req *http.Request) (string, error) {
 	authHeader := req.Header.Get("Authorization")
 	if authHeader == "" {
-		return "", errors.New("Authorization header required")
+		return "", errors.New("authorization header required")
 	}
 
 	if !strings.HasPrefix(authHeader, bearerSchema) {
-		return "", errors.New("Authorization requires Bearer scheme")
+		return "", errors.New("authorization requires Bearer scheme")
 	}
 
 	return authHeader[len(bearerSchema):], nil
 }
 
 func respondWithError(w http.ResponseWriter, code int, message string) {
-	respondWithJSON(w, code, map[string]string{"error": message})
+	respondWithJSON(w, code, views.ErrorResponse{ErrorMessage: message})
 }
 
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
