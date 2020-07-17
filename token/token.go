@@ -13,12 +13,11 @@ const (
 	RefreshTokenDuration time.Duration = 60
 )
 
-func CreateAccessToken(userGuid string) (string, error) {
+func CreateAccessToken(userGUID string) (string, error) {
 	var err error
 
 	atClaims := jwt.MapClaims{}
-	atClaims["authorized"] = true
-	atClaims["user_id"] = userGuid
+	atClaims["user_id"] = userGUID
 	atClaims["exp"] = time.Now().Add(time.Minute * AccessTokenDuration).Unix()
 	at := jwt.NewWithClaims(jwt.SigningMethodHS512, atClaims)
 
@@ -31,12 +30,11 @@ func CreateAccessToken(userGuid string) (string, error) {
 	return token, nil
 }
 
-func CreateRefreshToken(userGuid string) (string, error) {
+func CreateRefreshToken(userGUID string) (string, error) {
 	var err error
 
 	atClaims := jwt.MapClaims{}
-	atClaims["authorized"] = true
-	atClaims["user_id"] = userGuid
+	atClaims["user_id"] = userGUID
 	atClaims["exp"] = time.Now().Add(time.Minute * RefreshTokenDuration).Unix()
 	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
 
@@ -61,5 +59,6 @@ func HashToken(token string) (string, error) {
 
 func CheckTokenHash(token, hash string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(token))
+
 	return err == nil
 }

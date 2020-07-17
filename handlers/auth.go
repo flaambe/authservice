@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -8,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/flaambe/authservice/errs"
-
 	"github.com/flaambe/authservice/views"
 )
 
@@ -18,9 +18,9 @@ const (
 
 type AuthUsecase interface {
 	Auth(guid string) (views.AuthResponse, error)
-	Refresh(accessToken, refreshToken string) (views.RefreshResponse, error)
-	Delete(accessToken, refreshToken string) error
-	DeleteAll(accessToken string) error
+	RefreshToken(accessToken, refreshToken string) (views.RefreshResponse, error)
+	DeleteToken(accessToken, refreshToken string) error
+	DeleteAllTokens(accessToken string) error
 }
 
 type AuthHandler struct {
@@ -54,17 +54,19 @@ func (h *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
 			}
 
 			respondWithError(w, requestError.Status, requestError.Message)
+
 			return
 		}
 
 		respondWithError(w, http.StatusInternalServerError, err.Error())
+
 		return
 	}
 
 	respondWithJSON(w, http.StatusOK, response)
 }
 
-func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	var body views.RefreshTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respondWithError(w, http.StatusBadRequest, err.Error())
@@ -82,7 +84,15 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.authUsecase.Refresh(accessToken, body.RefreshToken)
+	refreshToken, err := base64.StdEncoding.DecodeString(body.RefreshToken)
+	if err != nil {
+		log.Println(err.Error())
+		respondWithError(w, http.StatusInternalServerError, "internal server error")
+
+		return
+	}
+
+	response, err := h.authUsecase.RefreshToken(accessToken, string(refreshToken))
 	if err != nil {
 		var requestError *errs.RequestError
 		if errors.As(err, &requestError) {
@@ -91,16 +101,19 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 			}
 
 			respondWithError(w, requestError.Status, requestError.Message)
+
 			return
 		}
+
 		respondWithError(w, http.StatusInternalServerError, err.Error())
+
 		return
 	}
 
 	respondWithJSON(w, http.StatusOK, response)
 }
 
-func (h *AuthHandler) Delete(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) DeleteToken(w http.ResponseWriter, r *http.Request) {
 	var body views.DeleteTokenRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -119,7 +132,15 @@ func (h *AuthHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.authUsecase.Delete(accessToken, body.RefreshToken)
+	refreshToken, err := base64.StdEncoding.DecodeString(body.RefreshToken)
+	if err != nil {
+		log.Println(err.Error())
+		respondWithError(w, http.StatusInternalServerError, "internal server error")
+
+		return
+	}
+
+	err = h.authUsecase.DeleteToken(accessToken, string(refreshToken))
 	if err != nil {
 		var requestError *errs.RequestError
 		if errors.As(err, &requestError) {
@@ -128,24 +149,26 @@ func (h *AuthHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			}
 
 			respondWithError(w, requestError.Status, requestError.Message)
+
 			return
 		}
 
 		respondWithError(w, http.StatusInternalServerError, err.Error())
+
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *AuthHandler) DeleteAll(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) DeleteAllTokens(w http.ResponseWriter, r *http.Request) {
 	accessToken, err := getBearer(r)
 	if err != nil {
 		respondWithError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
-	err = h.authUsecase.DeleteAll(accessToken)
+	err = h.authUsecase.DeleteAllTokens(accessToken)
 	if err != nil {
 		var requestErr *errs.RequestError
 		if errors.As(err, &requestErr) {
@@ -154,10 +177,12 @@ func (h *AuthHandler) DeleteAll(w http.ResponseWriter, r *http.Request) {
 			}
 
 			respondWithError(w, requestErr.Status, requestErr.Message)
+
 			return
 		}
 
 		respondWithError(w, http.StatusInternalServerError, err.Error())
+
 		return
 	}
 

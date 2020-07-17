@@ -61,9 +61,9 @@ func main() {
 
 	r := mux.NewRouter()
 	r.HandleFunc("/auth", authHandler.Auth).Methods("POST")
-	r.HandleFunc("/refresh", authHandler.Refresh).Methods("POST")
-	r.HandleFunc("/delete", authHandler.Delete).Methods("POST")
-	r.HandleFunc("/deleteAll", authHandler.DeleteAll).Methods("POST")
+	r.HandleFunc("/refreshToken", authHandler.RefreshToken).Methods("POST")
+	r.HandleFunc("/deleteToken", authHandler.DeleteToken).Methods("POST")
+	r.HandleFunc("/deleteAllTokens", authHandler.DeleteAllTokens).Methods("POST")
 
 	srv := &http.Server{
 		Addr:         ":8080",
