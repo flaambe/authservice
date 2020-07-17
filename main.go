@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
@@ -54,6 +55,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	uniqueOpt := options.Index().SetUnique(true)
+	uniqUserIndex := mongo.IndexModel{
+		Keys:    bson.M{"guid": 1},
+		Options: uniqueOpt,
+	}
+	db.Collection("users").Indexes().CreateOne(context.TODO(), uniqUserIndex)
+
+	expireOpt := options.Index().SetExpireAfterSeconds(0)
+	expireTokenIndex := mongo.IndexModel{
+		Keys:    bson.M{"refresh_expires_at": 1},
+		Options: expireOpt,
+	}
+	db.Collection("tokens").Indexes().CreateOne(context.TODO(), expireTokenIndex)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
