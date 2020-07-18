@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -50,69 +51,77 @@ func connect() (*mongo.Database, error) {
 	return db, nil
 }
 
+func ensureindexes(db *mongo.Database) {
+	uniqUserIndex := mongo.IndexModel{
+		Keys:    bson.M{"guid": 1},
+		Options: options.Index().SetUnique(true),
+	}
+
+	_, err := db.Collection("users").Indexes().CreateOne(context.TODO(), uniqUserIndex)
+
+	if err != nil {
+		log.Println(err)
+	}
+
+	expireTokenIndex := mongo.IndexModel{
+		Keys:    bson.M{"refresh_expires_at": 1},
+		Options: options.Index().SetExpireAfterSeconds(0),
+	}
+
+	_, err = db.Collection("tokens").Indexes().CreateOne(context.TODO(), expireTokenIndex)
+
+	if err != nil {
+		log.Println(err)
+	}
+}
+
 func main() {
 	db, err := connect()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	uniqueOpt := options.Index().SetUnique(true)
-	uniqUserIndex := mongo.IndexModel{
-		Keys:    bson.M{"guid": 1},
-		Options: uniqueOpt,
-	}
-	db.Collection("users").Indexes().CreateOne(context.TODO(), uniqUserIndex)
-
-	expireOpt := options.Index().SetExpireAfterSeconds(0)
-	expireTokenIndex := mongo.IndexModel{
-		Keys:    bson.M{"refresh_expires_at": 1},
-		Options: expireOpt,
-	}
-	db.Collection("tokens").Indexes().CreateOne(context.TODO(), expireTokenIndex)
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	defer db.Client().Disconnect(ctx)
 
+	ensureindexes(db)
+
 	authUsecase := usecase.NewAuthUsecase(db)
 	authHandler := handlers.NewAuthHandler(authUsecase)
 
-	r := mux.NewRouter()
-	r.HandleFunc("/auth", authHandler.Auth).Methods("POST")
-	r.HandleFunc("/refreshToken", authHandler.RefreshToken).Methods("POST")
-	r.HandleFunc("/deleteToken", authHandler.DeleteToken).Methods("POST")
-	r.HandleFunc("/deleteAllTokens", authHandler.DeleteAllTokens).Methods("POST")
+	router := mux.NewRouter()
+	router.HandleFunc("/auth", authHandler.Auth).Methods("POST")
+	router.HandleFunc("/refreshToken", authHandler.RefreshToken).Methods("POST")
+	router.HandleFunc("/deleteToken", authHandler.DeleteToken).Methods("POST")
+	router.HandleFunc("/deleteAllTokens", authHandler.DeleteAllTokens).Methods("POST")
 
 	srv := &http.Server{
 		Addr:         getPort(),
 		WriteTimeout: time.Second * 15,
 		ReadTimeout:  time.Second * 15,
 		IdleTimeout:  time.Second * 60,
-		Handler:      r,
+		Handler:      router,
 	}
 
 	go func() {
-		if err := srv.ListenAndServe(); err != nil {
-			log.Println(err)
-		}
+		panic(srv.ListenAndServe())
 	}()
 
-	c := make(chan os.Signal, 1)
-	// We'll accept graceful shutdowns when quit via SIGINT (Ctrl+C)
-	// SIGKILL, SIGQUIT or SIGTERM (Ctrl+/) will not be caught.
-	signal.Notify(c, os.Interrupt)
+	// Create channel for shutdown signals.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+	signal.Notify(stop, syscall.SIGTERM)
 
-	// Block until we receive our signal.
-	<-c
+	//Recieve shutdown signals.
+	<-stop
 
-	// Create a deadline to wait for.
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
-	// Doesn't block if no connections, but will otherwise wait
-	// until the timeout deadline.
-	srv.Shutdown(ctx)
-	// Optionally, you could run srv.Shutdown in a goroutine and block on
-	// <-ctx.Done() if your application should wait for other services
-	// to finalize based on context cancellation.
-	log.Println("shutting down")
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("error shutting down server %s", err)
+	} else {
+		log.Println("Server gracefully stopped")
+	}
 }

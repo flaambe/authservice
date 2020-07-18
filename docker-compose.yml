@@ -4,34 +4,25 @@ services:
   mongo_1:
     container_name: mongo1
     image: mongo
-    command: mongod --replSet rs0
+    command: ["--bind_ip_all", "--replSet","rs0"]
     restart: on-failure
     ports:
-      - 27017:27017
-    networks:
-      - my-mongo-cluster
+      - 30001:27017
   mongo_2:
     container_name: mongo2
     image: mongo
-    command: mongod --replSet rs0
+    command: ["--bind_ip_all", "--replSet","rs0"]
     restart: on-failure
     ports:
-      - 27018:27017
-    networks:
-      - my-mongo-cluster
+      - 30002:27017
     depends_on:
       - mongo_1
   mongo_3:
     container_name: mongo3
     image: mongo
-    command: mongod --replSet rs0
+    command: ["--bind_ip_all", "--replSet","rs0"]
     restart: on-failure
     ports:
-      - 27019:27017
-    networks:
-      - my-mongo-cluster
+      - 30003:27017
     depends_on:
       - mongo_2
-
-networks:
-  my-mongo-cluster:

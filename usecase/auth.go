@@ -11,6 +11,7 @@ import (
 	"github.com/flaambe/authservice/token"
 	"github.com/flaambe/authservice/views"
 
+	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -30,10 +31,15 @@ func NewAuthUsecase(db *mongo.Database) *AuthUsecase {
 func (a *AuthUsecase) Auth(guid string) (views.AuthResponse, error) {
 	var authResponse views.AuthResponse
 
+	_, err := uuid.Parse(guid)
+	if err != nil {
+		return authResponse, errs.New(http.StatusBadRequest, err.Error(), err)
+	}
+
 	users := a.db.Collection("users")
 	tokens := a.db.Collection("tokens")
 
-	err := a.db.Client().UseSession(context.Background(), func(sctx mongo.SessionContext) error {
+	err = a.db.Client().UseSession(context.Background(), func(sctx mongo.SessionContext) error {
 		err := sctx.StartTransaction(options.Transaction().
 			SetReadConcern(readconcern.Snapshot()).
 			SetWriteConcern(writeconcern.New(writeconcern.WMajority())),
@@ -130,7 +136,13 @@ func (a *AuthUsecase) RefreshToken(accessToken, refreshToken string) (views.Refr
 			return errs.New(http.StatusForbidden, "access token expired", nil)
 		}
 
-		if !token.CheckTokenHash(refreshToken, tokenValue.RefreshToken) {
+		decodedRefreshToken, err := base64.StdEncoding.DecodeString(refreshToken)
+
+		if err != nil {
+			return errs.New(http.StatusBadRequest, "refresh token incorrect", err)
+		}
+
+		if !token.CheckTokenHash(string(decodedRefreshToken), tokenValue.RefreshToken) {
 			return errs.New(http.StatusForbidden, "access forbidden", nil)
 		}
 
@@ -216,11 +228,19 @@ func (a *AuthUsecase) DeleteToken(accessToken, refreshToken string) error {
 			return errs.New(http.StatusForbidden, "access token expired", nil)
 		}
 
+		decodedRefreshToken, err := base64.StdEncoding.DecodeString(refreshToken)
+
+		if err != nil {
+			return errs.New(http.StatusBadRequest, "refresh token incorrect", err)
+		}
+
 		// Delete refresh token
-		if !token.CheckTokenHash(refreshToken, tokenValue.RefreshToken) {
+		if !token.CheckTokenHash(string(decodedRefreshToken), tokenValue.RefreshToken) {
 			return errs.New(http.StatusForbidden, "Access forbidden", nil)
 		}
+
 		err = tokens.FindOneAndDelete(sctx, filterByAccessToken).Err()
+
 		if err != nil {
 			sctx.AbortTransaction(sctx)
 			return errs.New(http.StatusInternalServerError, "server internal error", err)
