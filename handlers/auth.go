@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -84,15 +83,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshToken, err := base64.StdEncoding.DecodeString(body.RefreshToken)
-	if err != nil {
-		log.Println(err.Error())
-		respondWithError(w, http.StatusInternalServerError, "internal server error")
-
-		return
-	}
-
-	response, err := h.authUsecase.RefreshToken(accessToken, string(refreshToken))
+	response, err := h.authUsecase.RefreshToken(accessToken, body.RefreshToken)
 	if err != nil {
 		var requestError *errs.RequestError
 		if errors.As(err, &requestError) {
@@ -132,15 +123,7 @@ func (h *AuthHandler) DeleteToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshToken, err := base64.StdEncoding.DecodeString(body.RefreshToken)
-	if err != nil {
-		log.Println(err.Error())
-		respondWithError(w, http.StatusInternalServerError, "internal server error")
-
-		return
-	}
-
-	err = h.authUsecase.DeleteToken(accessToken, string(refreshToken))
+	err = h.authUsecase.DeleteToken(accessToken, body.RefreshToken)
 	if err != nil {
 		var requestError *errs.RequestError
 		if errors.As(err, &requestError) {
@@ -200,7 +183,7 @@ func getBearer(req *http.Request) (string, error) {
 		return "", errors.New("authorization requires Bearer scheme")
 	}
 
-	return authHeader[len(bearerSchema):], nil
+	return strings.ReplaceAll(authHeader, bearerSchema, ""), nil
 }
 
 func respondWithError(w http.ResponseWriter, code int, message string) {

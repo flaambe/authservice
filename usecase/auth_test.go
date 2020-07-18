@@ -105,7 +105,7 @@ func TestDeleteToken(t *testing.T) {
 	err = authUseCase.DeleteToken(authResponse.AccessToken, authResponse.RefreshToken)
 	require.NoError(t, err)
 
-	filter := bson.M{"refreh_token": authResponse.RefreshToken}
+	filter := bson.M{"refresh_token": authResponse.RefreshToken}
 	result := db.Collection("tokens").FindOne(context.TODO(), filter)
 	require.Error(t, result.Err())
 }

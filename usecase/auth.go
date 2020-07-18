@@ -129,7 +129,7 @@ func (a *AuthUsecase) RefreshToken(accessToken, refreshToken string) (views.Refr
 
 		err = tokens.FindOne(sctx, filterByAccessToken).Decode(&tokenValue)
 		if err != nil {
-			return errs.New(http.StatusForbidden, "access token expired", err)
+			return errs.New(http.StatusForbidden, "access forbidden", err)
 		}
 
 		if tokenValue.AccessExpiresAt.Time().Before(time.Now()) {
@@ -137,7 +137,6 @@ func (a *AuthUsecase) RefreshToken(accessToken, refreshToken string) (views.Refr
 		}
 
 		decodedRefreshToken, err := base64.StdEncoding.DecodeString(refreshToken)
-
 		if err != nil {
 			return errs.New(http.StatusBadRequest, "refresh token incorrect", err)
 		}
@@ -211,7 +210,6 @@ func (a *AuthUsecase) DeleteToken(accessToken, refreshToken string) error {
 			SetReadConcern(readconcern.Snapshot()).
 			SetWriteConcern(writeconcern.New(writeconcern.WMajority())),
 		)
-
 		if err != nil {
 			return errs.New(http.StatusInternalServerError, "server internal error", err)
 		}
@@ -221,7 +219,7 @@ func (a *AuthUsecase) DeleteToken(accessToken, refreshToken string) error {
 
 		err = tokens.FindOne(sctx, filterByAccessToken).Decode(&tokenValue)
 		if err != nil {
-			return errs.New(http.StatusForbidden, "access token expired", err)
+			return errs.New(http.StatusForbidden, "access forbidden", err)
 		}
 
 		if tokenValue.AccessExpiresAt.Time().Before(time.Now()) {
@@ -229,7 +227,6 @@ func (a *AuthUsecase) DeleteToken(accessToken, refreshToken string) error {
 		}
 
 		decodedRefreshToken, err := base64.StdEncoding.DecodeString(refreshToken)
-
 		if err != nil {
 			return errs.New(http.StatusBadRequest, "refresh token incorrect", err)
 		}
@@ -240,12 +237,6 @@ func (a *AuthUsecase) DeleteToken(accessToken, refreshToken string) error {
 		}
 
 		err = tokens.FindOneAndDelete(sctx, filterByAccessToken).Err()
-
-		if err != nil {
-			sctx.AbortTransaction(sctx)
-			return errs.New(http.StatusInternalServerError, "server internal error", err)
-		}
-
 		if err != nil {
 			sctx.AbortTransaction(sctx)
 			return errs.New(http.StatusInternalServerError, "server internal error", err)
@@ -270,7 +261,6 @@ func (a *AuthUsecase) DeleteAllTokens(accessToken string) error {
 			SetReadConcern(readconcern.Snapshot()).
 			SetWriteConcern(writeconcern.New(writeconcern.WMajority())),
 		)
-
 		if err != nil {
 			return errs.New(http.StatusInternalServerError, "server internal error", err)
 		}
@@ -280,7 +270,7 @@ func (a *AuthUsecase) DeleteAllTokens(accessToken string) error {
 
 		err = tokens.FindOne(sctx, filterByAccessToken).Decode(&tokenValue)
 		if err != nil {
-			return errs.New(http.StatusForbidden, "access token expired", err)
+			return errs.New(http.StatusForbidden, "access forbidden", err)
 		}
 
 		if tokenValue.AccessExpiresAt.Time().Before(time.Now()) {

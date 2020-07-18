@@ -60,7 +60,7 @@ func ensureindexes(db *mongo.Database) {
 	_, err := db.Collection("users").Indexes().CreateOne(context.TODO(), uniqUserIndex)
 
 	if err != nil {
-		log.Println(err)
+		log.Fatal(err)
 	}
 
 	expireTokenIndex := mongo.IndexModel{
@@ -71,7 +71,7 @@ func ensureindexes(db *mongo.Database) {
 	_, err = db.Collection("tokens").Indexes().CreateOne(context.TODO(), expireTokenIndex)
 
 	if err != nil {
-		log.Println(err)
+		log.Fatal(err)
 	}
 }
 

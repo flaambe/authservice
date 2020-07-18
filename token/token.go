@@ -14,15 +14,12 @@ const (
 )
 
 func CreateAccessToken(userGUID string) (string, error) {
-	var err error
-
 	atClaims := jwt.MapClaims{}
 	atClaims["user_id"] = userGUID
 	atClaims["exp"] = time.Now().Add(time.Minute * AccessTokenDuration).Unix()
 	at := jwt.NewWithClaims(jwt.SigningMethodHS512, atClaims)
 
 	token, err := at.SignedString([]byte(os.Getenv("ACCESS_SECRET")))
-
 	if err != nil {
 		return "", err
 	}
@@ -31,15 +28,12 @@ func CreateAccessToken(userGUID string) (string, error) {
 }
 
 func CreateRefreshToken(userGUID string) (string, error) {
-	var err error
-
 	atClaims := jwt.MapClaims{}
 	atClaims["user_id"] = userGUID
 	atClaims["exp"] = time.Now().Add(time.Minute * RefreshTokenDuration).Unix()
 	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
 
 	token, err := at.SignedString([]byte((os.Getenv("REFRESH_SECRET"))))
-
 	if err != nil {
 		return "", err
 	}
@@ -49,7 +43,6 @@ func CreateRefreshToken(userGUID string) (string, error) {
 
 func HashToken(token string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(token), 14)
-
 	if err != nil {
 		return "", err
 	}
