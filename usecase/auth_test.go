@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flaambe/authservice/models"
 	"github.com/flaambe/authservice/usecase"
 	"github.com/stretchr/testify/require"
 
@@ -103,6 +104,10 @@ func TestDeleteToken(t *testing.T) {
 
 	err = authUseCase.DeleteToken(authResponse.AccessToken, authResponse.RefreshToken)
 	require.NoError(t, err)
+
+	filter := bson.M{"refreh_token": authResponse.RefreshToken}
+	result := db.Collection("tokens").FindOne(context.TODO(), filter)
+	require.Error(t, result.Err())
 }
 
 func TestDeleteAllTokens(t *testing.T) {
@@ -111,4 +116,15 @@ func TestDeleteAllTokens(t *testing.T) {
 
 	err = authUseCase.DeleteAllTokens(authResponse.AccessToken)
 	require.NoError(t, err)
+
+	user := models.User{}
+	filter := bson.M{"guid": "4aa32cc5-d0e6-49e7-897d-d2b26748b7d3"}
+	err = db.Collection("users").FindOne(context.TODO(), filter).Decode(&user)
+	require.NoError(t, err)
+
+	filter = bson.M{"guid": user.GUID}
+	cursor, err := db.Collection("tokens").Find(context.TODO(), filter)
+	require.NoError(t, err)
+
+	require.Nil(t, cursor.Current)
 }
