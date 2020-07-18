@@ -16,6 +16,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+var (
+	db          *mongo.Database
+	authUseCase *usecase.AuthUsecase
+)
+
 func ensureindexes(db *mongo.Database) {
 	uniqUserIndex := mongo.IndexModel{
 		Keys:    bson.M{"guid": 1},
@@ -40,7 +45,7 @@ func ensureindexes(db *mongo.Database) {
 	}
 }
 
-func setup() *mongo.Database {
+func setup() {
 	mongoURI := os.Getenv("MONGODB_TEST_URI")
 	dbName := os.Getenv("DBNAME_TEST")
 
@@ -52,21 +57,28 @@ func setup() *mongo.Database {
 		log.Fatal(err)
 	}
 
-	db := client.Database(dbName)
+	db = client.Database(dbName)
 
 	ensureindexes(db)
 
 	if err != nil {
 		log.Fatal(err)
 	}
+}
 
-	return db
+func TestMain(m *testing.M) {
+	setup()
+
+	authUseCase = usecase.NewAuthUsecase(db)
+
+	exitVal := m.Run()
+
+	_ = db.Client().Disconnect(context.TODO())
+
+	os.Exit(exitVal)
 }
 
 func TestAuth(t *testing.T) {
-	db := setup()
-	authUseCase := usecase.NewAuthUsecase(db)
-
 	// Validate GUID and Token type
 	authResponse, err := authUseCase.Auth("4aa32cc5-d0e6-49e7-897d-d2b26748b7d3")
 	require.NoError(t, err)
@@ -75,45 +87,28 @@ func TestAuth(t *testing.T) {
 	// Refresh token should be base64 encoded
 	_, err = base64.StdEncoding.DecodeString(authResponse.RefreshToken)
 	require.NoError(t, err)
-
-	_ = db.Client().Disconnect(context.TODO())
 }
 
 func TestRefreshToken(t *testing.T) {
-	db := setup()
-	authUseCase := usecase.NewAuthUsecase(db)
-
 	authResponse, err := authUseCase.Auth("4aa32cc5-d0e6-49e7-897d-d2b26748b7d3")
 	require.NoError(t, err)
 
 	_, err = authUseCase.RefreshToken(authResponse.AccessToken, authResponse.RefreshToken)
 	require.NoError(t, err)
-
-	_ = db.Client().Disconnect(context.TODO())
 }
 
 func TestDeleteToken(t *testing.T) {
-	db := setup()
-	authUseCase := usecase.NewAuthUsecase(db)
-
 	authResponse, err := authUseCase.Auth("4aa32cc5-d0e6-49e7-897d-d2b26748b7d3")
 	require.NoError(t, err)
 
 	err = authUseCase.DeleteToken(authResponse.AccessToken, authResponse.RefreshToken)
 	require.NoError(t, err)
-
-	_ = db.Client().Disconnect(context.TODO())
 }
 
 func TestDeleteAllTokens(t *testing.T) {
-	db := setup()
-	authUseCase := usecase.NewAuthUsecase(db)
-
 	authResponse, err := authUseCase.Auth("4aa32cc5-d0e6-49e7-897d-d2b26748b7d3")
 	require.NoError(t, err)
 
 	err = authUseCase.DeleteAllTokens(authResponse.AccessToken)
 	require.NoError(t, err)
-
-	_ = db.Client().Disconnect(context.TODO())
 }

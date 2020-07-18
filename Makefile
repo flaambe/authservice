@@ -10,11 +10,11 @@ all: test build
 build: 
 	$(GOBUILD) -o $(GOBIN)/$(BINARY_NAME) -v
 test:
-	$(GOTEST) -v ./...
+	$(GOTEST) ./...
 clean:
 	$(GOCLEAN)
 	rm -f $(GOBIN)/$(BINARY_NAME)
 run:
-	$(GOBUILD) -o $(BINARY_NAME) -v ./...
+	$(GOBUILD) -o $(BINARY_NAME) ./...
 	./$(BINARY_NAME)
     
