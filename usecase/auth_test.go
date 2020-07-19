@@ -3,78 +3,32 @@ package usecase_test
 import (
 	"context"
 	"encoding/base64"
-	"log"
 	"os"
 	"testing"
-	"time"
 
+	"github.com/flaambe/authservice/config"
 	"github.com/flaambe/authservice/models"
 	"github.com/flaambe/authservice/usecase"
 	"github.com/stretchr/testify/require"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var (
-	db          *mongo.Database
+	dbConfig    *config.Config
 	authUseCase *usecase.AuthUsecase
 )
 
-func ensureindexes(db *mongo.Database) {
-	uniqUserIndex := mongo.IndexModel{
-		Keys:    bson.M{"guid": 1},
-		Options: options.Index().SetUnique(true),
-	}
-
-	_, err := db.Collection("users").Indexes().CreateOne(context.TODO(), uniqUserIndex)
-
-	if err != nil {
-		log.Println(err)
-	}
-
-	expireTokenIndex := mongo.IndexModel{
-		Keys:    bson.M{"refresh_expires_at": 1},
-		Options: options.Index().SetExpireAfterSeconds(0),
-	}
-
-	_, err = db.Collection("tokens").Indexes().CreateOne(context.TODO(), expireTokenIndex)
-
-	if err != nil {
-		log.Println(err)
-	}
-}
-
-func setup() {
-	mongoURI := os.Getenv("MONGODB_TEST_URI")
-	dbName := os.Getenv("DBNAME_TEST")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	db = client.Database(dbName)
-
-	ensureindexes(db)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
 func TestMain(m *testing.M) {
-	setup()
+	dbConfig = config.NewConfig()
+	dbConfig.Open(os.Getenv("MONGODB_TEST_URI"), os.Getenv("DBNAME_TEST"))
+	dbConfig.EnsureIndexes()
 
-	authUseCase = usecase.NewAuthUsecase(db)
+	authUseCase = usecase.NewAuthUsecase(dbConfig.DB)
 
 	exitVal := m.Run()
 
-	_ = db.Client().Disconnect(context.TODO())
+	_ = dbConfig.DB.Client().Disconnect(context.TODO())
 
 	os.Exit(exitVal)
 }
@@ -106,7 +60,7 @@ func TestDeleteToken(t *testing.T) {
 	require.NoError(t, err)
 
 	filter := bson.M{"refresh_token": authResponse.RefreshToken}
-	result := db.Collection("tokens").FindOne(context.TODO(), filter)
+	result := dbConfig.DB.Collection("tokens").FindOne(context.TODO(), filter)
 	require.Error(t, result.Err())
 }
 
@@ -119,11 +73,11 @@ func TestDeleteAllTokens(t *testing.T) {
 
 	user := models.User{}
 	filter := bson.M{"guid": "4aa32cc5-d0e6-49e7-897d-d2b26748b7d3"}
-	err = db.Collection("users").FindOne(context.TODO(), filter).Decode(&user)
+	err = dbConfig.DB.Collection("users").FindOne(context.TODO(), filter).Decode(&user)
 	require.NoError(t, err)
 
 	filter = bson.M{"guid": user.GUID}
-	cursor, err := db.Collection("tokens").Find(context.TODO(), filter)
+	cursor, err := dbConfig.DB.Collection("tokens").Find(context.TODO(), filter)
 	require.NoError(t, err)
 
 	require.Nil(t, cursor.Current)

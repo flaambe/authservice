@@ -9,14 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gorilla/mux"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
-
+	"github.com/flaambe/authservice/config"
 	"github.com/flaambe/authservice/handlers"
 	"github.com/flaambe/authservice/usecase"
+
+	"github.com/gorilla/mux"
 )
 
 func getPort() string {
@@ -28,66 +25,16 @@ func getPort() string {
 	return ":8080"
 }
 
-func connect() (*mongo.Database, error) {
-	mongoURI := os.Getenv("MONGODB_URI")
-	dbName := os.Getenv("DBNAME")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
-
-	if err != nil {
-		return nil, err
-	}
-
-	if err := client.Ping(ctx, readpref.Primary()); err != nil {
-		return nil, err
-	}
-
-	log.Println("Database connected")
-
-	db := client.Database(dbName)
-
-	return db, nil
-}
-
-func ensureindexes(db *mongo.Database) {
-	uniqUserIndex := mongo.IndexModel{
-		Keys:    bson.M{"guid": 1},
-		Options: options.Index().SetUnique(true),
-	}
-
-	_, err := db.Collection("users").Indexes().CreateOne(context.TODO(), uniqUserIndex)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	expireTokenIndex := mongo.IndexModel{
-		Keys:    bson.M{"refresh_expires_at": 1},
-		Options: options.Index().SetExpireAfterSeconds(0),
-	}
-
-	_, err = db.Collection("tokens").Indexes().CreateOne(context.TODO(), expireTokenIndex)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
 func main() {
-	db, err := connect()
-	if err != nil {
-		log.Fatal(err)
-	}
+	dbConfig := config.NewConfig()
+	dbConfig.Open(os.Getenv("MONGODB_URI"), os.Getenv("DBNAME"))
+	dbConfig.EnsureIndexes()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	defer db.Client().Disconnect(ctx)
+	defer dbConfig.DB.Client().Disconnect(ctx)
 
-	ensureindexes(db)
-
-	authUsecase := usecase.NewAuthUsecase(db)
+	authUsecase := usecase.NewAuthUsecase(dbConfig.DB)
 	authHandler := handlers.NewAuthHandler(authUsecase)
 
 	router := mux.NewRouter()
