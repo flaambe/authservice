@@ -3,11 +3,12 @@ package usecase_test
 import (
 	"context"
 	"encoding/base64"
+	"log"
 	"os"
 	"testing"
 
-	"github.com/flaambe/authservice/config"
 	"github.com/flaambe/authservice/models"
+	"github.com/flaambe/authservice/mongoconf"
 	"github.com/flaambe/authservice/usecase"
 	"github.com/stretchr/testify/require"
 
@@ -15,14 +16,19 @@ import (
 )
 
 var (
-	dbConfig    *config.Config
+	dbConfig    *mongoconf.Config
 	authUseCase *usecase.AuthUsecase
 )
 
 func TestMain(m *testing.M) {
-	dbConfig = config.NewConfig()
-	dbConfig.Open(os.Getenv("MONGODB_TEST_URI"), os.Getenv("DBNAME_TEST"))
-	dbConfig.EnsureIndexes()
+	dbConfig = mongoconf.NewConfig()
+	if err := dbConfig.Open(os.Getenv("MONGODB_TEST_URI"), os.Getenv("DBNAME_TEST")); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := dbConfig.EnsureIndexes(); err != nil {
+		log.Fatal(err)
+	}
 
 	authUseCase = usecase.NewAuthUsecase(dbConfig.DB)
 

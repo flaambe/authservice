@@ -1,8 +1,7 @@
-package config
+package mongoconf
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -18,32 +17,29 @@ func NewConfig() *Config {
 	return &Config{}
 }
 
-func (c *Config) Open(mongoURI, dbName string) {
+func (c *Config) Open(mongoURI, dbName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	c.DB = client.Database(dbName)
 
-	if err != nil {
-		log.Fatal(err)
-	}
+	return nil
 }
 
-func (c *Config) EnsureIndexes() {
+func (c *Config) EnsureIndexes() error {
 	uniqUserIndex := mongo.IndexModel{
 		Keys:    bson.M{"guid": 1},
 		Options: options.Index().SetUnique(true),
 	}
 
 	_, err := c.DB.Collection("users").Indexes().CreateOne(context.TODO(), uniqUserIndex)
-
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	expireTokenIndex := mongo.IndexModel{
@@ -52,8 +48,9 @@ func (c *Config) EnsureIndexes() {
 	}
 
 	_, err = c.DB.Collection("tokens").Indexes().CreateOne(context.TODO(), expireTokenIndex)
-
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
+
+	return nil
 }

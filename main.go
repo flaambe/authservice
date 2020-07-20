@@ -9,26 +9,22 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/flaambe/authservice/config"
 	"github.com/flaambe/authservice/handlers"
+	"github.com/flaambe/authservice/mongoconf"
 	"github.com/flaambe/authservice/usecase"
 
 	"github.com/gorilla/mux"
 )
 
-func getPort() string {
-	p := os.Getenv("PORT")
-	if p != "" {
-		return ":" + p
+func main() {
+	dbConfig := mongoconf.NewConfig()
+	if err := dbConfig.Open(os.Getenv("MONGODB_URI"), os.Getenv("DBNAME")); err != nil {
+		log.Fatal(err)
 	}
 
-	return ":8080"
-}
-
-func main() {
-	dbConfig := config.NewConfig()
-	dbConfig.Open(os.Getenv("MONGODB_URI"), os.Getenv("DBNAME"))
-	dbConfig.EnsureIndexes()
+	if err := dbConfig.EnsureIndexes(); err != nil {
+		log.Fatal(err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -67,8 +63,17 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("error shutting down server %s", err)
+		log.Printf("Error shutting down server %s", err)
 	} else {
 		log.Println("Server gracefully stopped")
 	}
+}
+
+func getPort() string {
+	p := os.Getenv("PORT")
+	if p != "" {
+		return ":" + p
+	}
+
+	return ":8080"
 }
