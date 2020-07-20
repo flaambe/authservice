@@ -29,6 +29,11 @@ func TestMain(m *testing.M) {
 		log.Fatal(err)
 	}
 
+	err := dbConfig.DB.Drop(context.TODO())
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	if err := dbConfig.EnsureIndexes(); err != nil {
 		log.Fatal(err)
 	}
