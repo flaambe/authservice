@@ -17,6 +17,7 @@ export MONGODB_URI=<MONGO_URI>
 export MONGODB_TEST_URI=<MONGO_TEST_URI>
 export DBNAME=<DATABASE_NAME>
 export DBNAME_TEST=<TEST_DATABASE_NAME>
+export PORT=<PORT>
 ```
 Run server
 ```bash

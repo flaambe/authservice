@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -36,12 +35,7 @@ func NewAuthHandler(au AuthUsecase) *AuthHandler {
 func (h *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
 	var body views.AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		if err == io.EOF {
-			respondWithError(w, http.StatusBadRequest, "request body is empty")
-			return
-		}
-
-		respondWithError(w, http.StatusBadRequest, err.Error())
+		respondWithError(w, http.StatusBadRequest, "json is invalid: "+err.Error())
 
 		return
 	}
@@ -75,12 +69,7 @@ func (h *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	var body views.RefreshTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		if err == io.EOF {
-			respondWithError(w, http.StatusBadRequest, "request body is empty")
-			return
-		}
-
-		respondWithError(w, http.StatusBadRequest, err.Error())
+		respondWithError(w, http.StatusBadRequest, "json is invalid: "+err.Error())
 
 		return
 	}
@@ -121,12 +110,7 @@ func (h *AuthHandler) DeleteToken(w http.ResponseWriter, r *http.Request) {
 	var body views.DeleteTokenRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		if err == io.EOF {
-			respondWithError(w, http.StatusBadRequest, "request body is empty")
-			return
-		}
-
-		respondWithError(w, http.StatusBadRequest, err.Error())
+		respondWithError(w, http.StatusBadRequest, "json is invalid: "+err.Error())
 
 		return
 	}
