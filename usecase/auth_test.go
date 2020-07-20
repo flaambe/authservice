@@ -3,10 +3,13 @@ package usecase_test
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"log"
+	"net/http"
 	"os"
 	"testing"
 
+	"github.com/flaambe/authservice/errs"
 	"github.com/flaambe/authservice/models"
 	"github.com/flaambe/authservice/mongoconf"
 	"github.com/flaambe/authservice/usecase"
@@ -56,6 +59,13 @@ func TestRefreshToken(t *testing.T) {
 
 	_, err = authUseCase.RefreshToken(authResponse.AccessToken, authResponse.RefreshToken)
 	require.NoError(t, err)
+
+	var requestErr *errs.RequestError
+
+	_, err = authUseCase.RefreshToken("invalid access token", "invalid refresh token")
+	if errors.As(err, &requestErr) {
+		require.Equal(t, http.StatusForbidden, requestErr.Status)
+	}
 }
 
 func TestDeleteToken(t *testing.T) {
@@ -68,6 +78,13 @@ func TestDeleteToken(t *testing.T) {
 	filter := bson.M{"refresh_token": authResponse.RefreshToken}
 	result := dbConfig.DB.Collection("tokens").FindOne(context.TODO(), filter)
 	require.Error(t, result.Err())
+
+	var requestErr *errs.RequestError
+
+	err = authUseCase.DeleteToken("invalid access token", "invalid refresh token")
+	if errors.As(err, &requestErr) {
+		require.Equal(t, http.StatusForbidden, requestErr.Status)
+	}
 }
 
 func TestDeleteAllTokens(t *testing.T) {
@@ -87,4 +104,11 @@ func TestDeleteAllTokens(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Nil(t, cursor.Current)
+
+	var requestErr *errs.RequestError
+
+	err = authUseCase.DeleteToken("invalid access token", "invalid refresh token")
+	if errors.As(err, &requestErr) {
+		require.Equal(t, http.StatusForbidden, requestErr.Status)
+	}
 }
