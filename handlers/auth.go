@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -35,7 +36,13 @@ func NewAuthHandler(au AuthUsecase) *AuthHandler {
 func (h *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
 	var body views.AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err == io.EOF {
+			respondWithError(w, http.StatusBadRequest, "request body is empty")
+			return
+		}
+
 		respondWithError(w, http.StatusBadRequest, err.Error())
+
 		return
 	}
 
@@ -68,7 +75,13 @@ func (h *AuthHandler) Auth(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	var body views.RefreshTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err == io.EOF {
+			respondWithError(w, http.StatusBadRequest, "request body is empty")
+			return
+		}
+
 		respondWithError(w, http.StatusBadRequest, err.Error())
+
 		return
 	}
 
@@ -108,7 +121,13 @@ func (h *AuthHandler) DeleteToken(w http.ResponseWriter, r *http.Request) {
 	var body views.DeleteTokenRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err == io.EOF {
+			respondWithError(w, http.StatusBadRequest, "request body is empty")
+			return
+		}
+
 		respondWithError(w, http.StatusBadRequest, err.Error())
+
 		return
 	}
 
@@ -176,11 +195,11 @@ func (h *AuthHandler) DeleteAllTokens(w http.ResponseWriter, r *http.Request) {
 func getBearer(req *http.Request) (string, error) {
 	authHeader := req.Header.Get("Authorization")
 	if authHeader == "" {
-		return "", errors.New("authorization header required")
+		return "", errs.New(http.StatusForbidden, "authorization header required", nil)
 	}
 
 	if !strings.HasPrefix(authHeader, bearerSchema) {
-		return "", errors.New("authorization requires Bearer scheme")
+		return "", errs.New(http.StatusForbidden, "authorization requires Bearer scheme", nil)
 	}
 
 	return strings.ReplaceAll(authHeader, bearerSchema, ""), nil

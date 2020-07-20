@@ -6,6 +6,23 @@ Simple authentication service with **Go** and **MongoDB**
 ```bash
 make build
 ```
+
+## Run & Environments
+
+Set environments
+```bash
+export ACCESS_SECRET=<ACCESS_TOKEN_SECRET_KEY>
+export REFRESH_SECRET=<REFRESH_TOKEN_SECRET_KEY>
+export MONGODB_URI=<MONGO_URI>
+export MONGODB_TEST_URI=<MONGO_TEST_URI>
+export DBNAME=<DATABASE_NAME>
+export DBNAME_TEST=<TEST_DATABASE_NAME>
+```
+Run server
+```bash
+make run
+```
+
 ## Test
 
 ```bash
